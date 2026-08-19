@@ -27,7 +27,7 @@ iPadのWebブラウザからミニPC (ROS 2) を経由し、Teensy 4.1で制御�
 cd ~/monorail_track_inspection_robot
 ./start_robot.sh
 
-2.iPadからの操作
+2.i Padからの操作
 2.1. iPadをアクセスポイントに接続します。
 2.2. ブラウザで http://192.168.1.20:8000 にアクセスします。
 2.3. 画面上のボタン(前進・停止・後退)で遠隔操作を行います。
