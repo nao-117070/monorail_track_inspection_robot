@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>モノレールロボット操作パネル</title>
+  <script src="roslib.min.js"></script>
+  <style>
+    body { font-family: sans-serif; text-align: center; background: #f0f2f5; margin: 20px; }
+    .card { background: white; padding: 20px; border-radius: 12px; margin: 15px auto; max-width: 500px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    button { font-size: 1.2rem; font-weight: bold; padding: 15px 30px; margin: 10px; border: none; border-radius: 8px; cursor: pointer; }
+    .btn-fwd { background: #4CAF50; color: white; }
+    .btn-stop { background: #f44336; color: white; }
+    .btn-bwd { background: #2196F3; color: white; }
+    .status { font-size: 1.1rem; color: #333; font-weight: bold; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+    th { background-color: #f2f2f2; }
+  </style>
+</head>
+<body>
+
+  <h1>モノレールロボット Webコントローラー</h1>
+  <div id="connection-status" class="status" style="color: red;">接続中...</div>
+
+  <!-- 操作用ボタン -->
+  <div class="card">
+    <h2>走行コントロール</h2>
+    <button class="btn-fwd" onclick="sendCmd(800)">前進 (800 RPM)</button>
+    <button class="btn-stop" onclick="sendCmd(0)">停止 (0 RPM)</button>
+    <button class="btn-bwd" onclick="sendCmd(-800)">後退 (-800 RPM)</button>
+  </div>
+
+  <!-- センサーデータリアルタイム表示 -->
+  <div class="card">
+    <h2>リアルタイムセンサーデータ</h2>
+    <table>
+      <tr>
+        <th>項目</th><th>1輪 (前左)</th><th>2輪 (前右)</th><th>3輪 (後左)</th><th>4輪 (後右)</th>
+      </tr>
+      <tr>
+        <th>ポテンショ角度(°)</th>
+        <td id="pot1">-</td><td id="pot2">-</td><td id="pot3">-</td><td id="pot4">-</td>
+      </tr>
+      <tr>
+        <th>モータ速度(RPM)</th>
+        <td id="rpm1">-</td><td id="rpm2">-</td><td id="rpm3">-</td><td id="rpm4">-</td>
+      </tr>
+    </table>
+  </div>
+
+  <script>
+    // 接続先IPをブラウザのドメインから自動取得（どのIPになっても自動適応）
+    const wsUrl = 'ws://' + window.location.hostname + ':9090';
+    const ros = new ROSLIB.Ros({ url: wsUrl });
+
+    ros.on('connection', () => {
+      document.getElementById('connection-status').innerText = 'ROS 2と接続成功！';
+      document.getElementById('connection-status').style.color = 'green';
+    });
+
+    ros.on('error', () => {
+      document.getElementById('connection-status').innerText = '接続エラー';
+      document.getElementById('connection-status').style.color = 'red';
+    });
+
+    // 1. 命令送信用パブリッシャー (/cmd_rpm)
+    const cmdTopic = new ROSLIB.Topic({
+      ros: ros,
+      name: '/cmd_rpm',
+      messageType: 'std_msgs/msg/Int16'
+    });
+
+    function sendCmd(rpm) {
+      const msg = new ROSLIB.Message({ data: rpm });
+      cmdTopic.publish(msg);
+    }
+
+    // 2. センサーデータ受信用サブスクライバー (/motor_status)
+    const statusTopic = new ROSLIB.Topic({
+      ros: ros,
+      name: '/motor_status',
+      messageType: 'std_msgs/msg/String'
+    });
+
+    statusTopic.subscribe((message) => {
+      // 届くフォーマット: 時間, 角度1,2,3,4, RPM1,2,3,4
+      const parts = message.data.split(',');
+      if (parts.length >= 9) {
+        document.getElementById('pot1').innerText = parts[1];
+        document.getElementById('pot2').innerText = parts[2];
+        document.getElementById('pot3').innerText = parts[3];
+        document.getElementById('pot4').innerText = parts[4];
+
+        document.getElementById('rpm1').innerText = parts[5];
+        document.getElementById('rpm2').innerText = parts[6];
+        document.getElementById('rpm3').innerText = parts[7];
+        document.getElementById('rpm4').innerText = parts[8];
+      }
+    });
+  </script>
+</body>
+</html>
