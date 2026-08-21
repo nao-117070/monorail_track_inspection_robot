@@ -1,62 +1,62 @@
 ﻿#include <Arduino.h>
-#include "DriveController.h"
-#include "RK39A1A00007.h"
-#include <IntervalTimer.h>
+#include <NativeEthernet.h>
+#include <NativeEthernetUdp.h>
 #include <Metro.h>
 
-const GainParams speedLoopGain = {3, 0.3, 0.5};
-const GainParams positionLoopGain = {0.03, 0.0, 0.0};
-const double controlIntervalMs = 1.0;
-const int controllerNodeId = 1;
-const int motorCount = 4; // 制御するモータ数
+// ---------- ネットワーク設定 ----------
+byte mac[] = { 0x04, 0xE9, 0xE5, 0x00, 0x00, 0x01 };
+IPAddress ip(192, 168, 1, 10);        // Teensy IP
+IPAddress pc_ip(192, 168, 1, 20);     // ミニPC IP
+unsigned int localPort = 8888;
+EthernetUDP Udp;
 
-const int potPin = A0;             // ここにポテンショメータを接続します
-const int potAnalogMax = 4095;     // Teensy 4.1 の ADC 解像度
-const float potAngleScale = 360.0f / potAnalogMax;
-const int canBusBaud = 500000;     // 必要に応じてボーレートを変更
-
-BusLink busBridge(controllerNodeId);
-DriveController driveControl(busBridge, controlIntervalMs);
-RK39A1A00007Sensor angleSensor(busBridge, 0x300);
-IntervalTimer updateTimer;
-Metro statusTimer(500);
+int16_t baseTargetRpm = 0; // ミニPCから送られてくる基準目標速度
+Metro statusTimer(100);    // ★0.1秒(100ms)周期
 
 void setup() {
   Serial.begin(115200);
-  delay(100);
-  busBridge.initBus(canBusBaud);
-  angleSensor.begin();
-
-  pinMode(potPin, INPUT);
-
-  for (int id = 1; id <= motorCount; ++id) {
-    driveControl.configureMotorType(id, DRIVE_M3508);
-    driveControl.setSpeedGain(id, speedLoopGain);
-    driveControl.setPositionGain(id, positionLoopGain);
-    driveControl.enableTorque(id, true);
-  }
-  updateTimer.begin(DriveController::interruptHandler, controlIntervalMs * 1000);
+  Ethernet.begin(mac, ip);
+  Udp.begin(localPort);
+  
+  delay(1000);
+  Serial.println("==========================================");
+  Serial.println("  Teensy UDP Test Node Started (Debug Log)");
+  Serial.println("==========================================");
 }
 
 void loop() {
-  const int potRaw = analogRead(potPin);
-  const float potVoltageAngle = potRaw * potAngleScale;
-  const uint8_t potSensorId = 1; // 確認したいポテンショメータID
-
-  if (statusTimer.check()) {
-    Serial.print("AnalogPot A0:");
-    Serial.print(potRaw);
-    Serial.print(" -> ");
-    Serial.print(potVoltageAngle, 1);
-    Serial.println(" deg");
-
-    Serial.print("CanPotID "); Serial.print(potSensorId);
-    if (angleSensor.readAngle(potSensorId)) {
-      Serial.print(" ANG:"); Serial.println(angleSensor.getAngleDegrees(potSensorId), 2);
-    } else {
-      Serial.println(" ANG:N/A");
+  // 1. ミニPCからのUDP命令を受信 (ミニPC -> Teensy)
+  int packetSize = Udp.parsePacket();
+  if (packetSize > 0) {
+    char packetBuffer[64];
+    int len = Udp.read(packetBuffer, sizeof(packetBuffer) - 1);
+    if (len > 0) {
+      packetBuffer[len] = '\0';
+      baseTargetRpm = (int16_t)atoi(packetBuffer); // 受信した数字を更新
+      
+      // ★ 受信ログをシリアル出力
+      Serial.print("[RX (受信)] PCからの回転指示: ");
+      Serial.print(packetBuffer);
+      Serial.print(" -> 適用RPM: ");
+      Serial.println(baseTargetRpm);
     }
   }
+
+  // 2. 0.1秒(100ms)ごとにミニPCへデータ送信 (Teensy -> ミニPC)
+  if (statusTimer.check()) {
+    char sendBuffer[256];
+    
+    // ダミーデータ: 経過時間, 角度(10,20,30,40度固定), 実RPM(受信したbaseTargetRpmをそのままセット)
+    sprintf(sendBuffer, "%lu,10.0,20.0,30.0,40.0,%d,%d,%d,%d",
+            millis(),
+            baseTargetRpm, baseTargetRpm, baseTargetRpm, baseTargetRpm);
+
+    Udp.beginPacket(pc_ip, 8888);
+    Udp.write(sendBuffer);
+    Udp.endPacket();
+
+    // ★ 送信ログをシリアル出力
+    Serial.print("[TX (送信)] PCへパケット送信: ");
+    Serial.println(sendBuffer);
+  }
 }
-
-
